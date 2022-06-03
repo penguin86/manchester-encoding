@@ -25,23 +25,39 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 import os
 import sys
 import logging
-
+import wave
+import struct
 
 NAME = 'manchester-encoder'
 VERSION = '0.1'
 DESCRIPTION = 'Encodes a file using the manchester encoding and outputs it as audio file'
 
 FRAME_DELIMITER = 129 # (1, 0, 0, 0, 0, 0, 0, 1)
-
+AUDIO_VOLUME = 16384 # 0 to 32767
+AUDIO_BITRATE = 44100
 
 
 class Main:
 
 	def __init__(self):
 		self._log = logging.getLogger('main')
+		self.audioSink = None
 
 	def run(self, inputFile, outputFile, clock):
-		# Open output file
+		self.clock = int(clock)
+
+		# Check clock speed is valid
+		if self.clock > (AUDIO_BITRATE / 2):
+			raise ValueError("Clock too high: max supported clock is {}".format(AUDIO_BITRATE/2))
+
+		# Open output audio file
+		self.audioSink = wave.open(outputFile, 'w')
+		self.audioSink.setnchannels(1) # mono
+		self.audioSink.setsampwidth(2)
+		self.audioSink.setframerate(44100.0)
+
+		# Preamble
+		self.outputPreamble()
 
 		# Read input file
 		bytesToEncode = []
@@ -65,6 +81,7 @@ class Main:
 				# Encode byte
 				self.encodeByte(byte)
 		
+		self.audioSink.close()
 		self._log.info('Completed')
 
 	def encodeByte(self, byte):
@@ -94,7 +111,7 @@ class Main:
 		# Outputs the preable: a sequence of 64 "1" and "0" used to facilitate the receiver
 		# syncronizing on our clock. The sequence starts with 1 and ends with 0
 		for x in range(64):
-			self.encode(x % 2 == 0)
+			self.encodeBit(x % 2 == 0)
 
 	def encodeBit(self, bit):
 		# Encodes a single bit in a pair of bits to be written on the media.
@@ -109,10 +126,16 @@ class Main:
 
 	def out(self, encodedBit):
 		# Write already encoded bit on the media
+		value = 0
 		if encodedBit:
-			print('―', end='')
+			value = AUDIO_VOLUME
 		else:
-			print('_', end='')
+			value = -AUDIO_VOLUME
+		
+		# The duration of the signal is calculated based on the user-specified clock speed
+		duration = int(AUDIO_BITRATE / self.clock)
+		for x in range(duration):
+			self.audioSink.writeframesraw(struct.pack('<h', value))
 
 
 if __name__ == '__main__':
