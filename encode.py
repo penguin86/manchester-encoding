@@ -33,6 +33,7 @@ VERSION = '0.1'
 DESCRIPTION = 'Encodes a file using the manchester encoding and outputs it as audio file'
 
 FRAME_DELIMITER = 129 # (1, 0, 0, 0, 0, 0, 0, 1)
+PREAMBLE_DURATION = 128
 AUDIO_VOLUME = 16384 # 0 to 32767
 AUDIO_BITRATE = 44100
 
@@ -110,7 +111,7 @@ class Main:
 	def outputPreamble(self):
 		# Outputs the preable: a sequence of 64 "1" and "0" used to facilitate the receiver
 		# syncronizing on our clock. The sequence starts with 1 and ends with 0
-		for x in range(64):
+		for x in range(PREAMBLE_DURATION):
 			self.encodeBit(x % 2 == 0)
 
 	def encodeBit(self, bit):
