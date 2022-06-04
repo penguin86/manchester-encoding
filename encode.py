@@ -33,6 +33,7 @@ VERSION = '0.1'
 DESCRIPTION = 'Encodes a file using the manchester encoding and outputs it as audio file'
 
 FRAME_DELIMITER = 126 # (01111110)
+FRAME_DELIMITER_EVERY_BYTES = 64
 PREAMBLE_DURATION = 128
 AUDIO_VOLUME = 16384 # 0 to 32767
 AUDIO_BITRATE = 44100
@@ -69,13 +70,13 @@ class Main:
 				if not byte:
 					# Finished reading file
 					# Terminate with delimiter and exit
-					self.encodeByte(FRAME_DELIMITER, encode_frame_delimiter=False)
+					#self.encodeByte(FRAME_DELIMITER, encode_frame_delimiter=False)
 					break
 				byte = byte[0]
 
 				# Every 64 bytes, outputs a frame delimiter: 01111110
 				# This is used by receiver to syncronize to the start of a byte
-				if position % 64 == 0:
+				if position % FRAME_DELIMITER_EVERY_BYTES == 0:
 					self.encodeByte(FRAME_DELIMITER, encode_frame_delimiter=False)
 				position = position + 1
 

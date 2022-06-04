@@ -33,6 +33,7 @@ VERSION = '0.1'
 DESCRIPTION = 'Decodes a file using the manchester encoding'
 
 FRAME_DELIMITER = 126 # (01111110)
+FRAME_DELIMITER_EVERY_BYTES = 64
 PREAMBLE_DURATION = 128
 ZERO_POINT = 0 # The 0 value: values less than this are considered 0, more than this 1
 
@@ -46,17 +47,21 @@ class Main:
 		# Open input audio file
 		self.audioSource = wave.open(inputFile,'r')
 
-		try:
-			self.syncWithClock()
-			self._log.info("Sync: clock duration is {}".format(self.clockDuration))
-			self.waitForStart()
-			#self._log.info("Found start of data")
-		except ValueError as e:
-			self._log.error("Ran out of input data before completing initialization!")
+		# Open output file
+		with open(outputFile,'wb') as outf:
+			self.outputSink = outf
 
-		#self.decodeFile()
+			try:
+				self.syncWithClock()
+				self._log.info("Found clock: clock duration is {}".format(self.clockDuration))
+				self.waitForStart()
+				self._log.info("Synced to first byte: start decoding actual data")
+				self.decodeActualData()
+			except ValueError as e:
+				self._log.error("Ran out of input data before completing initialization!")
 
 		self.audioSource.close()
+		self.outputSink.close()
 
 	def syncWithClock(self):
 		# Uses the preamble to obtain the clock duration
@@ -88,13 +93,53 @@ class Main:
 				self._log.info("Found first frame delimiter")
 				return
 
-	#def decodeFile():
-		# From the bit after the FRAME_DELIMITER on, there is the real data. Decode and write to file
+	def decodeActualData(self):
+		# From the bit after the FRAME_DELIMITER on, there is the actual data. Decode at groups of 8 bytes and write to file
+		position = 0 # We already consumed the first delimiter
+		try:
+			while True:
+				expectFrameDelimiter = position > 0 and position % FRAME_DELIMITER_EVERY_BYTES == 0
+				if expectFrameDelimiter:
+					decodedByte = self.decodeByte(True)
+					if decodedByte != FRAME_DELIMITER:
+						raise ValueError('Expecting a frame delimiter, found {}'.format(decodedByte))
+					self._log.info('Found frame delimiter')
 
-		#try:
+				decodedByte = self.decodeByte(False)
+				try:
+					self.outputSink.write(bytes([decodedByte]))
+				except Exception as e:
+					self._log.error(e)
+				position = position + 1
 
-		#except ValueError as e:
-			# Completed reading file
+		except ValueError as e:
+			# Stream finished
+			# If last byte isn't a frame delimiter, throw error
+			self._log.info(e)
+
+	def decodeByte(self, expectFrameDelimiter=False):
+		# Decodes a byte (to be used _after_ the first frame delimiter was found)
+		decodedByte = 0
+		for x in range(8):
+			value = self.decodeBit()
+
+			# Shift the byte to left
+			decodedByte = decodedByte >> 1
+
+			# Truncate the length to 8 bits
+			decodedByte = decodedByte & 255 # 0 11111111
+			# Add the read bit in the least significant position
+			if value:
+				decodedByte = decodedByte + 128 #10000000
+
+			if decodedByte == 248 and not expectFrameDelimiter: # 248 = 11111000
+				self._log.info("Here")
+				# We found 5 1s: ignore next 0: has been added to avoid a real 01111110 byte to be interpreted as frame delimiter
+				if self.decodeBit():
+					# Should be 0!
+					raise ValueError('Found xx0111111 while not expecting a delimiter!')
+		return decodedByte
+
 
 	def decodeBit(self):
 		# Decodes a bit. Searches for the phase invertion at 75% to 125% of the clock cycle
