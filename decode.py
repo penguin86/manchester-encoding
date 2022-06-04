@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 """ @package docstring
-Manchester encoder
+Manchester decoder
 
-Encodes a file using the manchester encoding and outputs it as audio file
+Decodes a file encoded with the manchester code
 See https://www.youtube.com/watch?v=8BhjXqw9MqI&list=PLowKtXNTBypH19whXTVoG3oKSuOcw_XeW&index=3
 and following videos by awesome Ben Eater
 Very slow and inefficient implementation, meant only to be clear and didactic
@@ -32,7 +32,7 @@ NAME = 'manchester-decoder'
 VERSION = '0.1'
 DESCRIPTION = 'Decodes a file using the manchester encoding'
 
-FRAME_DELIMITER = 129 # (1, 0, 0, 0, 0, 0, 0, 1)
+FRAME_DELIMITER = 126 # (01111110)
 PREAMBLE_DURATION = 128
 ZERO_POINT = 0 # The 0 value: values less than this are considered 0, more than this 1
 
@@ -49,7 +49,7 @@ class Main:
 		try:
 			self.syncWithClock()
 			self._log.info("Sync: clock duration is {}".format(self.clockDuration))
-			#self.waitForStart()
+			self.waitForStart()
 			#self._log.info("Found start of data")
 		except ValueError as e:
 			self._log.error("Ran out of input data before completing initialization!")
@@ -60,37 +60,34 @@ class Main:
 
 	def syncWithClock(self):
 		# Uses the preamble to obtain the clock duration
-		i = 0
+		analyzedCycles = 0
 		while True:
-			(duration, value) = self.readRawBit()
+			(cycles, raising) = self.goToNextZeroCrossing(True)
+			analyzedCycles = analyzedCycles + cycles
 
-			print(duration, value)
-			
-			if i < PREAMBLE_DURATION/4:
-				# First cycles are used to extimate clock duration
-				self.clockDuration = self.clockDuration + duration / 2
-				i = i + 1
-		# We are now synced with clock. Add a 25% "slack" to make following samples at 
-		# 1/4 and 3/4 to clock cycle: remember that every cycle has 2 values: 01 if the
-		# encoded bit was 1 and 10 if it was 0
-		for x in range(0, int(self.clockDuration / 4)):
-			self.readRawBit()
+			if analyzedCycles > PREAMBLE_DURATION * self.clockDuration / 4:
+				# At this point we should have an idea of the clock duration, move on
+				return
 
 	def waitForStart(self):
 		# After the clock has been extimated, continue reading and wait for first delimiter
 		lastByte = 0
 		while True:
-			value = decodeBit()
+			value = self.decodeBit()
 
-			# Shift the byte to left and add the read bit in the least significant position
+			# Shift the byte to left
 			lastByte = lastByte << 1
+			# Truncate the length to 8 bits
+			lastByte = lastByte & 255 # 0 11111111
+			# Add the read bit in the least significant position
 			if value:
 				lastByte = lastByte + 1
 
 			if lastByte == FRAME_DELIMITER:
 				# Found frame delimiter! We are in sync! YAY!
+				self._log.info("Found first frame delimiter")
 				return
-			
+
 	#def decodeFile():
 		# From the bit after the FRAME_DELIMITER on, there is the real data. Decode and write to file
 
@@ -98,33 +95,25 @@ class Main:
 
 		#except ValueError as e:
 			# Completed reading file
-			
-	def readRawBit(self):
-		# Reads a raw bit. Returns the duration of that bit and the value.
-		duration = 0
-		prev = None
-		while True:
-			frame = self.audioSource.readframes(1)
-			if not frame:
-				raise ValueError('No more data to read')
-
-			v = int(struct.unpack('<h', frame)[0]) > ZERO_POINT
-			
-			if prev is None:
-				prev = v
-			else:
-				# Detect zero crossing
-				if prev < ZERO_POINT and v > ZERO_POINT:
-					break
-				if prev > ZERO_POINT and v < ZERO_POINT:
-					break
-
-				prev = v
-				duration = duration + 1
-
-		return (duration, prev > ZERO_POINT)
 
 	def decodeBit(self):
+		# Decodes a bit. Searches for the phase invertion at 75% to 125% of the clock cycle
+		bitDuration = 0
+		while True:
+			(duration, raising) = self.goToNextZeroCrossing(False)
+			bitDuration = bitDuration + duration
+			if bitDuration < self.clockDuration * 0.75:
+				# Ignore: half-cycle crossing due to two equal digits one near the other
+				continue
+			if bitDuration > self.clockDuration * 1.25:
+				# Lost tracking!
+				raise Exception("Lost tracking! No phase inversion found between {} and {} samples from the last one".format(self.clockDuration * 0.75, self.clockDuration * 1.25))
+
+			# This is our phase inversion signal
+			return raising
+
+
+
 		# Reads and decodes 2 raw bits into 1 decoded bit. 01 (raising) = 1, 10 (falling) = 0
 		# Works only once clock is synced
 		# The bits are read at 1/4 and 3/4 of clock cycle
@@ -147,13 +136,31 @@ class Main:
 			# Lost sync!!!
 			raise Exception()
 
+	def goToNextZeroCrossing(self, adjustClockDuration):
+		# Find the next zero crossing and returns:
+		# (cycles since last inversion, True if is raising, False if is falling)
+		cyclesSinceLastInversion = 0
+		prev = None
+		while True:
+			frame = self.audioSource.readframes(1)
+			if not frame:
+				raise ValueError('No more data to read')
+
+			v = int(struct.unpack('<h', frame)[0]) > ZERO_POINT
+			if prev == None:
+				prev = v
+			if v != prev:
+				# Zero-point crossing!
+				if adjustClockDuration:
+					self.clockDuration = (self.clockDuration + cyclesSinceLastInversion) / 2
+				return (cyclesSinceLastInversion, v)
+
+			cyclesSinceLastInversion = cyclesSinceLastInversion + 1
 
 
 
 
 
-
-		
 
 
 if __name__ == '__main__':

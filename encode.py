@@ -32,7 +32,7 @@ NAME = 'manchester-encoder'
 VERSION = '0.1'
 DESCRIPTION = 'Encodes a file using the manchester encoding and outputs it as audio file'
 
-FRAME_DELIMITER = 129 # (1, 0, 0, 0, 0, 0, 0, 1)
+FRAME_DELIMITER = 126 # (01111110)
 PREAMBLE_DURATION = 128
 AUDIO_VOLUME = 16384 # 0 to 32767
 AUDIO_BITRATE = 44100
@@ -69,23 +69,23 @@ class Main:
 				if not byte:
 					# Finished reading file
 					# Terminate with delimiter and exit
-					self.encodeByte(FRAME_DELIMITER)
+					self.encodeByte(FRAME_DELIMITER, encode_frame_delimiter=False)
 					break
 				byte = byte[0]
 
 				# Every 64 bytes, outputs a frame delimiter: 01111110
 				# This is used by receiver to syncronize to the start of a byte
 				if position % 64 == 0:
-					self.encodeByte(FRAME_DELIMITER)
+					self.encodeByte(FRAME_DELIMITER, encode_frame_delimiter=False)
 				position = position + 1
 
 				# Encode byte
 				self.encodeByte(byte)
-		
+
 		self.audioSink.close()
 		self._log.info('Completed')
 
-	def encodeByte(self, byte):
+	def encodeByte(self, byte, encode_frame_delimiter=True):
 		# Encodes a byte with the Mancester Encoding
 		# Note that the byte is read from the most important to the least important bit
 		# Es: 10000010 is not 130, but 65
@@ -98,13 +98,13 @@ class Main:
 			# Write bit
 			self.encodeBit(lastBit)
 
-			# If we have 5 consecutive "1", add a 0 after, to avoid being interpreted as a frame delimiter
+			# If we have 5 consecutive "1", add a 0 after, to avoid being interpreted as a frame delimiter (01111110))
 			if lastBit:
 				consecutiveOnes = consecutiveOnes + 1
 			else:
 				consecutiveOnes = 0
-			
-			if consecutiveOnes == 5:
+
+			if consecutiveOnes == 5 and encode_frame_delimiter:
 				self.encodeBit(0)
 				consecutiveOnes = 0
 
@@ -116,7 +116,7 @@ class Main:
 
 	def encodeBit(self, bit):
 		# Encodes a single bit in a pair of bits to be written on the media.
-		# The "1" is encoded as a transition from 0 to 1 (01) while the "0" is endoded as a 
+		# The "1" is encoded as a transition from 0 to 1 (01) while the "0" is endoded as a
 		# transition from 1 to 0 (10)
 		if bit:
 			self.out(0)
@@ -132,7 +132,7 @@ class Main:
 			value = AUDIO_VOLUME
 		else:
 			value = -AUDIO_VOLUME
-		
+
 		# The duration of the signal is calculated based on the user-specified clock speed
 		duration = int(AUDIO_BITRATE / self.clock)
 		for x in range(duration):
