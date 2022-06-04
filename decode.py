@@ -102,7 +102,7 @@ class Main:
 				if expectFrameDelimiter:
 					decodedByte = self.decodeByte(True)
 					if decodedByte != FRAME_DELIMITER:
-						raise ValueError('Expecting a frame delimiter, found {}'.format(decodedByte))
+						raise ValueError('Expecting a frame delimiter, found {} at position {}'.format(decodedByte, position))
 					self._log.info('Found frame delimiter')
 
 				decodedByte = self.decodeByte(False)
@@ -120,6 +120,7 @@ class Main:
 	def decodeByte(self, expectFrameDelimiter=False):
 		# Decodes a byte (to be used _after_ the first frame delimiter was found)
 		decodedByte = 0
+		consecutiveOnes = 0
 		for x in range(8):
 			value = self.decodeBit()
 
@@ -131,9 +132,11 @@ class Main:
 			# Add the read bit in the least significant position
 			if value:
 				decodedByte = decodedByte + 128 #10000000
+				consecutiveOnes = consecutiveOnes + 1
+			else:
+				consecutiveOnes = 0
 
-			if decodedByte == 248 and not expectFrameDelimiter: # 248 = 11111000
-				self._log.info("Here")
+			if consecutiveOnes == 5 and not expectFrameDelimiter:
 				# We found 5 1s: ignore next 0: has been added to avoid a real 01111110 byte to be interpreted as frame delimiter
 				if self.decodeBit():
 					# Should be 0!
