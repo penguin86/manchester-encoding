@@ -34,8 +34,12 @@ DESCRIPTION = 'Decodes a file using the manchester encoding'
 
 FRAME_DELIMITER = 126 # (01111110)
 FRAME_DELIMITER_EVERY_BYTES = 64
-PREAMBLE_DURATION = 128
-ZERO_POINT = 0 # The 0 value: values less than this are considered 0, more than this 1
+PREAMBLE_DURATION = 512
+# Values nearest to zero than this are not considered: set to more than noise, less than signal
+AUDIO_MIN_VOLUME = 12288
+# The 0 value: values less than this are considered 0, more than this 1. This should be
+# auto-adjusting (to leave out the DC component, in hw one would use a transformer)
+ZERO_POINT = 0
 
 class Main:
 
@@ -69,6 +73,7 @@ class Main:
 		while True:
 			(cycles, raising) = self.goToNextZeroCrossing(True)
 			analyzedCycles = analyzedCycles + cycles
+			self._log.debug("Found zero crossing after {}, raising: {}".format(cycles, raising))
 
 			if analyzedCycles > PREAMBLE_DURATION * self.clockDuration / 4:
 				# At this point we should have an idea of the clock duration, move on
@@ -103,7 +108,7 @@ class Main:
 					decodedByte = self.decodeByte(True)
 					if decodedByte != FRAME_DELIMITER:
 						raise ValueError('Expecting a frame delimiter, found {} at position {}'.format(decodedByte, position))
-					self._log.info('Found frame delimiter')
+					self._log.debug('Found frame delimiter')
 
 				decodedByte = self.decodeByte(False)
 				try:
@@ -144,7 +149,7 @@ class Main:
 		return decodedByte
 
 
-	def decodeBit(self):
+	def decodeBit(self, allowSilence = False):
 		# Decodes a bit. Searches for the phase invertion at 75% to 125% of the clock cycle
 		bitDuration = 0
 		while True:
@@ -194,16 +199,20 @@ class Main:
 			if not frame:
 				raise ValueError('No more data to read')
 
-			v = int(struct.unpack('<h', frame)[0]) > ZERO_POINT
-			if prev == None:
-				prev = v
-			if v != prev:
-				# Zero-point crossing!
-				if adjustClockDuration:
-					self.clockDuration = (self.clockDuration + cyclesSinceLastInversion) / 2
-				return (cyclesSinceLastInversion, v)
+			lvl = int(struct.unpack('<h', frame)[0])
+			if lvl > AUDIO_MIN_VOLUME or lvl < -AUDIO_MIN_VOLUME:
+				v = lvl > AUDIO_MIN_VOLUME
+				if prev == None:
+					prev = v
+				if v != prev:
+					# Zero-point crossing!
+					if adjustClockDuration:
+						self.clockDuration = (self.clockDuration + cyclesSinceLastInversion) / 2
+					return (cyclesSinceLastInversion, v)
 
-			cyclesSinceLastInversion = cyclesSinceLastInversion + 1
+			# Count only cycles after first valid signal
+			if prev != None:
+				cyclesSinceLastInversion = cyclesSinceLastInversion + 1
 
 
 
@@ -222,10 +231,13 @@ if __name__ == '__main__':
 	parser.add_argument('inputFile', help="audio file to decode (in wav format)")
 	parser.add_argument('outputFile', help="decoded file to write")
 	parser.add_argument('-v', '--verbose', action='store_true', help="verbose output")
+	parser.add_argument('-d', '--debug', action='store_true', help="even more verbose output, for debug")
 	args = parser.parse_args()
 
 	if args.verbose:
 		logging.basicConfig(level=logging.INFO)
+	elif args.debug:
+		logging.basicConfig(level=logging.DEBUG)
 	else:
 		logging.basicConfig()
 
