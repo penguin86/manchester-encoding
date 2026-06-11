@@ -1,5 +1,8 @@
 # Manchester encoder/decoder
 
+> This project was moved to [my private git server](https://git.ichibi.eu/penguin86/manchester-encoding) . This repository may not be up to date.
+> This is a personal project, probably of little use for others, and I don't currently accept contributions on it. Anyway, feel free to contact me if you have any idea.
+
 # What
 [Manchester code](https://en.wikipedia.org/wiki/Manchester_code) is an encoding algorithm created originally to store data in the Manchester university's Mark 1 computer drum disk. Later used to store data on audio tape, in ethernet communications (base10), NFC etc.
 
